@@ -84,6 +84,175 @@ ok: [db2.example.lan] => {
 
 Note: db3 won't show up here, because the server is not reachable. The IP was transferred from `db3` to `db2`. Works!
 
+### Checking out the replication
+
+First on one server we create a database and use it.
+
+```
+MariaDB [(none)]> CREATE DATABASE stuff; USE stuff;
+Query OK, 1 row affected (0.00 sec)
+
+Database changed
+MariaDB [stuff]>
+```
+
+Then we create a table there:
+
+```
+MariaDB [stuff]> CREATE TABLE numbers(id INT UNSIGNED NOT NULL AUTO_INCREMENT, aNumber INT UNSIGNED NOT NULL, PRIMARY KEY(id));
+Query OK, 0 rows affected (0.01 sec)
+```
+
+Then we insert some data:
+
+```
+MariaDB [stuff]> INSERT INTO numbers (aNumber) SELECT COALESCE(MAX(aNumber) + 1, 1) FROM numbers;
+Query OK, 1 row affected (0.01 sec)
+Records: 1  Duplicates: 0  Warnings: 0
+
+MariaDB [stuff]>
+MariaDB [stuff]> INSERT INTO numbers (aNumber) SELECT COALESCE(MAX(aNumber) + 1, 1) FROM numbers;
+Query OK, 1 row affected (0.01 sec)
+Records: 1  Duplicates: 0  Warnings: 0
+```
+
+Now we should have two entries:
+
+```
+MariaDB [stuff]> SELECT * FROM numbers;
++----+---------+
+| id | aNumber |
++----+---------+
+|  5 |       1 |
+|  8 |       2 |
++----+---------+
+2 rows in set (0.00 sec)
+```
+
+The first thing I found out is that the IDs are not sequential. Interesting! Now let's have a look at another server. Is there the same data? The answer should be *yes*.
+
+### Locking tables
+
+Is a LOCK TABLES statement on one server distributed?
+
+On db1:
+```
+MariaDB [stuff]> LOCK TABLE numbers WRITE;
+Query OK, 0 rows affected (0.00 sec)
+```
+
+Now only the session on db1 should be able to write to the table.
+
+On db2:
+```
+MariaDB [stuff]> INSERT INTO numbers (aNumber) SELECT COALESCE(MAX(aNumber) + 1, 1) FROM numbers;
+Query OK, 1 row affected (0.01 sec)
+Records: 1  Duplicates: 0  Warnings: 0
+
+MariaDB [stuff]> SELECT * FROM numbers;
++----+---------+
+| id | aNumber |
++----+---------+
+|  5 |       1 |
+|  8 |       2 |
+| 13 |       3 |
++----+---------+
+3 rows in set (0.00 sec)
+```
+
+Well, that worked. So a lock is not distributed. But is the data on db1, too?
+
+On db1:
+```
+MariaDB [stuff]> SELECT * FROM numbers;
++----+---------+
+| id | aNumber |
++----+---------+
+|  5 |       1 |
+|  8 |       2 |
++----+---------+
+2 rows in set (0.00 sec)
+```
+
+Well, the data is not there. Is it already broken? What happens when the lock is removed?
+
+On db1:
+```
+MariaDB [stuff]> UNLOCK TABLES;
+Query OK, 0 rows affected (0.00 sec)
+
+MariaDB [stuff]> SELECT * FROM numbers;
++----+---------+
+| id | aNumber |
++----+---------+
+|  5 |       1 |
+|  8 |       2 |
+| 13 |       3 |
++----+---------+
+3 rows in set (0.00 sec)
+```
+
+Oh wow. The data appeared. So nothing was lost. Interesting. Remember: Every node is a master server. The is no master/slave setup.
+
+### Transactions
+
+So locks are not distributed. How about transactions?
+
+On db1:
+```
+MariaDB [stuff]> SELECT * FROM numbers;
++----+---------+
+| id | aNumber |
++----+---------+
+|  5 |       1 |
+|  8 |       2 |
+| 13 |       3 |
++----+---------+
+3 rows in set (0.00 sec)
+
+MariaDB [stuff]> BEGIN;
+Query OK, 0 rows affected (0.00 sec)
+
+MariaDB [stuff]> INSERT INTO numbers (aNumber) SELECT COALESCE(MAX(aNumber) + 1, 1) FROM numbers;
+Query OK, 1 row affected (0.00 sec)
+Records: 1  Duplicates: 0  Warnings: 0
+```
+
+I would assume there is no value 4 in the database on db2. Let's check that:
+```
+MariaDB [stuff]> SELECT * FROM numbers;
++----+---------+
+| id | aNumber |
++----+---------+
+|  5 |       1 |
+|  8 |       2 |
+| 13 |       3 |
++----+---------+
+3 rows in set (0.00 sec)
+```
+
+No value 4 there. What happens when I delete everything on db2 now?
+
+```
+MariaDB [stuff]> TRUNCATE numbers;
+Query OK, 0 rows affected (0.01 sec)
+
+MariaDB [stuff]> SELECT * FROM numbers;
+Empty set (0.00 sec)
+```
+
+As expected: The table is empty now. Now let's commit on db1:
+
+```
+MariaDB [stuff]> COMMIT;
+ERROR 1213 (40001): Deadlock: wsrep aborted transaction
+
+MariaDB [stuff]> SELECT * FROM numbers;
+Empty set (0.00 sec)
+```
+
+So my transaction was killed. Transactions are therefore not replicated.
+
 ## Add more servers
 
 You can install as many servers as you like. Open the file `inventory` and add more lines. You also have to edit the file `Vagrantfile`.   
@@ -93,3 +262,6 @@ Both files are self explaining.
 
 Developed based on:
 https://linuxadmin.io/galeria-cluster-configuration-centos-7/
+
+Limitations using a Galera Cluster:
+http://galeracluster.com/documentation-webpages/limitations.html
