@@ -1,0 +1,13 @@
+---
+- hosts: galera-cluster
+  gather_facts: false
+
+  tasks:
+      - name: Searching failover IP
+        shell: "/usr/sbin/ip a | grep \"inet 192.168.33.2\" | wc -l"
+        register: result
+
+      - name: Who has it?
+        debug:
+            msg: "I've the failover IP!"
+        when: result.stdout == '1'

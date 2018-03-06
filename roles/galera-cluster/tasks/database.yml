@@ -1,0 +1,74 @@
+---
+- name: Setting hostname
+  shell: "hostnamectl set-hostname {{ inventory_hostname }}"
+  changed_when: false
+
+- name: Add MariaDB Repo
+  copy:
+      content: |
+        [mariadb]
+        name = MariaDB
+        baseurl = http://yum.mariadb.org/10.2/rhel7-amd64
+        gpgkey=https://yum.mariadb.org/RPM-GPG-KEY-MariaDB
+        gpgcheck=1
+      dest: /etc/yum.repos.d/mariadb.repo
+
+- name: Installing mariadb-server
+  yum:
+      name: "{{ item }}"
+      state: present
+  with_items:
+      - mariadb-server
+      - MySQL-python
+      - galera
+      - net-tools # for ifconfig which galera needs
+      - libselinux-python
+  register: dbinstall
+
+- name: Disable SElinux
+  selinux:
+      state: disabled
+
+- name: Remove galera section from server.cnf
+  lineinfile:
+      path: /etc/my.cnf.d/server.cnf
+      line: "[galera]"
+      state: absent
+
+- name: Create galera.conf
+  template:
+      src: galera.cnf.j2
+      dest: /etc/my.cnf.d/galera.cnf
+
+- name: Build cluster
+  shell: galera_new_cluster
+  run_once: true
+  when: dbinstall.changed == true
+
+- name: Start mariadb-server
+  systemd:
+      name: mariadb
+      state: started
+      enabled: true
+      masked: false
+
+- block:
+    - name: Removes all anonymous user accounts
+      mysql_user:
+          name: ''
+          host_all: yes
+          state: absent
+
+    - name: Setting MySQL root password
+      mysql_user:
+          name: root
+          password: "supersecret"
+      when: dbinstall.changed == true
+  run_once: true
+
+- name: Uploading my.cnf file
+  copy:
+      src: my.cnf
+      dest: /root/.my.cnf
+      owner: root
+      group: 0600

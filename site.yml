@@ -1,0 +1,4 @@
+---
+- hosts: galera-cluster
+  roles:
+      - galera-cluster

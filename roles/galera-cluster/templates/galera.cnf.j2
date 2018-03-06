@@ -1,0 +1,14 @@
+[galera]
+# Mandatory settings
+wsrep_on=ON
+wsrep_provider=/usr/lib64/galera/libgalera_smm.so
+wsrep_cluster_address=gcomm://{{ groups['galera-cluster'] | map('extract', hostvars, ['ansible_ssh_host']) | join(',') }}
+wsrep_node_address={{ ansible_ssh_host }}
+wsrep_node_name={{ inventory_hostname }}
+binlog_format=row
+default_storage_engine=InnoDB
+innodb_autoinc_lock_mode=2
+# Custom settings
+wsrep_cluster_name="mygaleracluster"
+wsrep_sst_method=rsync
+bind-address=0.0.0.0

@@ -1,0 +1,7 @@
+---
+- name: Restart keepalived
+  systemd:
+      name: keepalived
+      state: restarted
+      enabled: true
+      masked: false

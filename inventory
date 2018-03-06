@@ -1,0 +1,12 @@
+
+[galera-cluster]
+db1.example.lan ansible_ssh_host=192.168.33.11 ansible_ssh_private_key_file=.vagrant/machines/db1/virtualbox/private_key
+db2.example.lan ansible_ssh_host=192.168.33.12 ansible_ssh_private_key_file=.vagrant/machines/db2/virtualbox/private_key
+db3.example.lan ansible_ssh_host=192.168.33.13 ansible_ssh_private_key_file=.vagrant/machines/db3/virtualbox/private_key
+
+[galera-cluster:vars]
+ansible_ssh_port=22
+ansible_ssh_user=vagrant
+become_method=su
+ansible_become_pass=vagrant
+ansible_ssh_extra_args='-o StrictHostKeyChecking=no'

@@ -1,0 +1,19 @@
+---
+- name: Install keepalived
+  yum:
+      name: keepalived
+      state: present
+
+- name: Allow nonlocal IP binding
+  sysctl:
+      name: net.ipv4.ip_nonlocal_bind
+      value: 1
+      sysctl_set: yes
+      state: present
+
+- name: Deploying keepalived config
+  template:
+      src: keepalived.conf.j2
+      dest: /etc/keepalived/keepalived.conf
+  notify:
+      - Restart keepalived
