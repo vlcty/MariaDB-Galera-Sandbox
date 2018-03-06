@@ -84,6 +84,143 @@ ok: [db2.example.lan] => {
 
 Note: db3 won't show up here, because the server is not reachable. The IP was transferred from `db3` to `db2`. Works!
 
+### Create a new user
+
+Create a new user with the name `auser` with password `auser` and a new database `myapplication`:
+
+```
+MariaDB [(none)]> CREATE USER 'auser'@'%'IDENTIFIED BY 'auser';
+Query OK, 0 rows affected (0.01 sec)
+
+MariaDB [(none)]> CREATE DATABASE myapplication;
+Query OK, 1 row affected (0.01 sec)
+
+MariaDB [(none)]> GRANT ALL ON myapplication TO auser;
+Query OK, 0 rows affected (0.01 sec)
+
+MariaDB [(none)]> FLUSH PRIVILEGES;
+Query OK, 0 rows affected (0.00 sec)
+```
+
+You should now be able to log in from a third machine:
+
+```
+:-$ mysql -h 192.168.33.2 -u auser -p myapplication;
+Enter password:
+Welcome to the MySQL monitor.  Commands end with ; or \g.
+Your MySQL connection id is 22
+Server version: 5.5.5-10.2.13-MariaDB MariaDB Server
+
+Copyright (c) 2000, 2018, Oracle and/or its affiliates. All rights reserved.
+
+Oracle is a registered trademark of Oracle Corporation and/or its
+affiliates. Other names may be trademarks of their respective
+owners.
+
+Type 'help;' or '\h' for help. Type '\c' to clear the current input statement.
+
+mysql>
+```
+
+Now shutdown the server with the active failover IP configured and watch what happens. Will we receive a disconnect or will the connection be smoothly migrated to a new host?
+
+Solution (active was db2):
+```
+:-$ vagrant halt db2
+==> db2: Attempting graceful shutdown of VM...
+```
+
+My MySQL connection after the next Statement:
+```
+mysql> SHOW TABLES;
+ERROR 2013 (HY000): Lost connection to MySQL server during query
+
+mysql> SHOW TABLES;
+ERROR 2006 (HY000): MySQL server has gone away
+No connection. Trying to reconnect...
+Connection id:    11
+Current database: myapplication
+
+Empty set (0,01 sec)
+```
+
+Damn! Looks like that doesn't work as smooth as expected. But there is also a good news. The modern connectors can handle that without user interaction.
+
+### Testing Perls DBD::mysql mysql_auto_reconnect option
+
+The Perl module `DBD::mysql` provides the connection option `mysql_auto_reconnect`. According to the documentation this should reconnect to the database if a disconnect occures.   
+In this repo there is a perl script perl-connection-test.pl. To run it please do the creation steps mentioned in "Create a new user" first.
+
+
+Afterwards run the script. It should look like this:
+```
+:-$ perl perl-connection-test.pl
+Log: Please create the database and the user first! See README for details.
+
+Log: Connected to the database!
+Log: Dropped database connectionTest
+Log: Recreated table connectionTest
+Log: Statement prepared!
+Log: First statement was executed!
+Now kill the server with the floating IP! Hit enter afterwards
+```
+
+At this point the scripts waits with an open connection. The database table currently should look like this:
+
+```
+MariaDB [myapplication]> SELECT * FROM connectionTest;
++----+-----------------------------------------------+
+| id | message                                       |
++----+-----------------------------------------------+
+|  6 | I was inserted before the connection was lost |
++----+-----------------------------------------------+
+1 row in set (0.00 sec)
+```
+
+Now find out which server we are currently connected to via the floating IP:
+
+```
+:~$ ansible-playbook who-has-the-failover-ip.yml
+
+[...]
+
+TASK [Who has it?]
+##################################
+skipping: [db2.example.lan]
+skipping: [db3.example.lan]
+ok: [db1.example.lan] => {
+    "msg": "I've the failover IP!"
+}
+```
+
+In my example `db1` is currently active. Kill it!
+
+```
+:~$ vagrant halt db1
+```
+
+Wait a few seconds. Now hit enter so the script would continue:
+
+```
+Log: Second statement was executed!
+Log: If you see this message your application survived the outage without only one additional line of code. I just turned on the mysql_auto_reconnect feature! Grab a beer now! You have earned it!
+```
+
+Looks great! A quick look into the database:
+
+```
+MariaDB [myapplication]> SELECT * FROM connectionTest;
++----+-----------------------------------------------+
+| id | message                                       |
++----+-----------------------------------------------+
+|  6 | I was inserted before the connection was lost |
+|  9 | I was inserted after the connection was lost  |
++----+-----------------------------------------------+
+2 rows in set (0.00 sec)
+```
+
+Very nice! Just one option passed into the `connect`-function and we mitigated a connection loss without great changes to the logic. However this won't work with a open transaction.
+
 ### Checking out the replication
 
 First on one server we create a database and use it.
@@ -265,3 +402,6 @@ https://linuxadmin.io/galeria-cluster-configuration-centos-7/
 
 Limitations using a Galera Cluster:
 http://galeracluster.com/documentation-webpages/limitations.html
+
+Monitoring a Galera Cluster:
+http://galeracluster.com/documentation-webpages/monitoringthecluster.html
